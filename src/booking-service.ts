@@ -15,19 +15,22 @@ import { AppError, notFound } from './errors.ts';
  *        |                                                     (seat released)
  *        |--provider declined---------------> payment_failed
  *        |--pay ok, but seat gone (refund)---> refunded
+ *        |     '--provider refund call failed--> refund_pending --job retries--> refunded
  *        |--class filled before we charged---> cancelled
  *        |--cancelled by parent/admin--------> cancelled
  *        '--TTL elapsed (background job)-----> expired
  *
  * payment_failed / refunded / expired / cancelled are terminal. A parent who
  * wants to try again creates a *new* booking, which gives every attempt a
- * fresh id and keeps the state machine small.
+ * fresh id and keeps the state machine small. refund_pending is terminal for
+ * the seat (it is gone) but not for the money: the reconcile job finishes it.
  */
 export const BOOKING_STATUSES = [
   'pending_payment',
   'confirmed',
   'payment_failed',
   'refunded',
+  'refund_pending',
   'expired',
   'cancelled',
 ] as const;
@@ -74,7 +77,8 @@ export interface Booking {
   confirmed_at: string | null;
 }
 
-export type PaymentAttemptStatus = 'processing' | 'succeeded' | 'failed' | 'refunded';
+/** Money state, separate from the seat state on the booking. */
+export type PaymentAttemptStatus = 'processing' | 'succeeded' | 'failed' | 'refunded' | 'refund_pending';
 
 export interface PaymentAttempt {
   id: string;
@@ -93,6 +97,7 @@ export type PayOutcome =
   | 'confirmed' // charged and seat claimed
   | 'payment_failed' // provider declined; nothing charged
   | 'refunded' // charged, seat was gone, refund issued
+  | 'refund_pending' // charged, seat was gone, refund call failed; the job will retry
   | 'class_full' // class filled before we charged; nothing charged
   | 'already_confirmed'; // idempotent replay of a paid booking
 
@@ -133,7 +138,18 @@ export type ParentBookingRow = Booking & {
   class_title: string;
   starts_at: string;
   price_cents: number;
+  /** Status of the latest payment attempt, so the UI can say "refund in progress". */
+  payment_status: PaymentAttemptStatus | null;
 };
+
+/** Emitted after every committed write, so the HTTP layer can push live updates to open pages. */
+export interface BookingChange {
+  type: 'booking_created' | 'booking_updated' | 'bookings_expired';
+  booking_id?: string;
+  trial_class_id?: string;
+  status?: BookingStatus;
+  count?: number;
+}
 
 export interface ServiceOptions {
   /** Injectable clock (tests use it to fast-forward past the pending TTL). */
@@ -141,6 +157,10 @@ export interface ServiceOptions {
   /** How long a pending_payment booking may sit unpaid before the job expires it. */
   pendingTtlMinutes?: number;
   currency?: string;
+  /** Called after each committed change (never inside a transaction). */
+  onChange?: (change: BookingChange) => void;
+  /** Where operational warnings go (refund failures). Defaults to console.warn. */
+  log?: (message: string) => void;
 }
 
 type SeatClaim =
@@ -159,6 +179,8 @@ export class BookingService {
   private readonly now: () => Date;
   private readonly pendingTtlMs: number;
   private readonly currency: string;
+  private readonly onChange: ((change: BookingChange) => void) | undefined;
+  private readonly log: (message: string) => void;
 
   constructor(db: DB, provider: PaymentProvider, opts: ServiceOptions = {}) {
     this.db = db;
@@ -166,6 +188,8 @@ export class BookingService {
     this.now = opts.now ?? (() => new Date());
     this.pendingTtlMs = (opts.pendingTtlMinutes ?? 15) * 60_000;
     this.currency = opts.currency ?? 'SGD';
+    this.onChange = opts.onChange;
+    this.log = opts.log ?? ((message) => console.warn(message));
   }
 
   // ----- Reads -------------------------------------------------------------
@@ -206,7 +230,9 @@ export class BookingService {
   listBookingsForParent(parentId: string): ParentBookingRow[] {
     return this.db
       .prepare(
-        `SELECT b.*, s.name AS student_name, c.title AS class_title, c.starts_at, c.price_cents
+        `SELECT b.*, s.name AS student_name, c.title AS class_title, c.starts_at, c.price_cents,
+                (SELECT pa.status FROM payment_attempts pa
+                  WHERE pa.booking_id = b.id ORDER BY pa.created_at DESC LIMIT 1) AS payment_status
            FROM bookings b
            JOIN students s ON s.id = b.student_id
            JOIN trial_classes c ON c.id = b.trial_class_id
@@ -254,7 +280,7 @@ export class BookingService {
    * is atomic even with a second app process on the same database.
    */
   createBooking(input: { studentId: string; trialClassId: string }): { booking: Booking; reused: boolean } {
-    return transaction(this.db, () => {
+    const result = transaction(this.db, () => {
       const student = this.db.prepare('SELECT * FROM students WHERE id = ?').get(input.studentId) as unknown as
         | Student
         | undefined;
@@ -322,6 +348,15 @@ export class BookingService {
       }
       return { booking, reused: false };
     });
+    if (!result.reused) {
+      this.emit({
+        type: 'booking_created',
+        booking_id: result.booking.id,
+        trial_class_id: result.booking.trial_class_id,
+        status: result.booking.status,
+      });
+    }
+    return result;
   }
 
   /**
@@ -338,6 +373,19 @@ export class BookingService {
    * the confirmed booking (safe for retried requests / duplicate webhooks).
    */
   async pay(input: { bookingId: string; card: string; delayMs?: number }): Promise<PayResult> {
+    const result = await this.payInner(input);
+    if (result.outcome !== 'already_confirmed') {
+      this.emit({
+        type: 'booking_updated',
+        booking_id: result.booking.id,
+        trial_class_id: result.booking.trial_class_id,
+        status: result.booking.status,
+      });
+    }
+    return result;
+  }
+
+  private async payInner(input: { bookingId: string; card: string; delayMs?: number }): Promise<PayResult> {
     const booking = this.getBooking(input.bookingId);
     if (!booking) throw notFound('Booking', input.bookingId);
     if (booking.status === 'confirmed') {
@@ -390,15 +438,17 @@ export class BookingService {
     }
 
     // (4) Lost the race (or the booking stopped being pending while we were
-    // charging). Money goes back; the roster is never touched.
-    const { refundRef } = await this.provider.refund(result.providerRef, cls.price_cents);
-    const refunded = this.updateAttempt(attempt.id, { status: 'refunded', refund_ref: refundRef });
+    // charging). Money goes back; the roster is never touched. If the refund
+    // call itself fails, the attempt is parked as refund_pending and the
+    // reconcile job retries it; the seat outcome is the same either way.
+    const refund = await this.tryRefund(attempt.id, result.providerRef, cls.price_cents);
     if (claim.reason === 'already_confirmed') {
       // Defensive: a second successful charge for an already-confirmed booking.
-      return { outcome: 'already_confirmed', booking: claim.booking, attempt: refunded };
+      return { outcome: 'already_confirmed', booking: claim.booking, attempt: refund.attempt };
     }
-    const updated = this.setStatus(booking.id, 'refunded', claim.reason);
-    return { outcome: 'refunded', booking: updated, attempt: refunded };
+    const status = refund.ok ? 'refunded' : 'refund_pending';
+    const updated = this.setStatus(booking.id, status, claim.reason);
+    return { outcome: status, booking: updated, attempt: refund.attempt };
   }
 
   /** Cancel a pending or confirmed booking. A confirmed cancellation frees the seat and refunds. */
@@ -408,12 +458,14 @@ export class BookingService {
     if (booking.status !== 'pending_payment' && booking.status !== 'confirmed') {
       throw new AppError(409, 'BOOKING_NOT_CANCELLABLE', `Booking is already ${booking.status}`, { status: booking.status });
     }
+    // The seat is released no matter what; the money follows, retried by the job if needed.
     const paid = this.latestAttempt(bookingId);
     if (paid?.status === 'succeeded' && paid.provider_ref) {
-      const { refundRef } = await this.provider.refund(paid.provider_ref, paid.amount_cents);
-      this.updateAttempt(paid.id, { status: 'refunded', refund_ref: refundRef });
+      await this.tryRefund(paid.id, paid.provider_ref, paid.amount_cents);
     }
-    return this.setStatus(bookingId, 'cancelled', reason);
+    const updated = this.setStatus(bookingId, 'cancelled', reason);
+    this.emit({ type: 'booking_updated', booking_id: updated.id, trial_class_id: updated.trial_class_id, status: updated.status });
+    return updated;
   }
 
   /**
@@ -433,7 +485,33 @@ export class BookingService {
                              WHERE pa.booking_id = bookings.id AND pa.status = 'processing')`,
       )
       .run(nowIso, nowIso);
-    return { expired: Number(res.changes) };
+    const expired = Number(res.changes);
+    if (expired > 0) this.emit({ type: 'bookings_expired', count: expired });
+    return { expired };
+  }
+
+  /**
+   * Background job: retry refunds the provider failed to process. Safe to run
+   * often. A refund that goes through moves the attempt to `refunded` and, for
+   * a booking that lost the last seat, the booking from refund_pending to
+   * refunded. Cancelled bookings stay cancelled; only their money state changes.
+   */
+  async retryPendingRefunds(): Promise<{ retried: number; refunded: number; still_pending: number }> {
+    const pending = this.db
+      .prepare(`SELECT * FROM payment_attempts WHERE status = 'refund_pending' ORDER BY created_at`)
+      .all() as unknown as PaymentAttempt[];
+    let refunded = 0;
+    for (const attempt of pending) {
+      if (!attempt.provider_ref) continue;
+      const res = await this.tryRefund(attempt.id, attempt.provider_ref, attempt.amount_cents);
+      if (!res.ok) continue;
+      refunded++;
+      const booking = this.getBooking(attempt.booking_id)!;
+      const updated =
+        booking.status === 'refund_pending' ? this.setStatus(booking.id, 'refunded', booking.status_reason) : booking;
+      this.emit({ type: 'booking_updated', booking_id: updated.id, trial_class_id: updated.trial_class_id, status: updated.status });
+    }
+    return { retried: pending.length, refunded, still_pending: pending.length - refunded };
   }
 
   // ----- Internals ---------------------------------------------------------
@@ -470,6 +548,25 @@ export class BookingService {
       }
       return { claimed: true, booking: this.getBooking(bookingId)! };
     });
+  }
+
+  /**
+   * Refund a successful charge. Never throws: a provider outage parks the
+   * attempt as refund_pending (with failure_code = refund_failed) for the
+   * reconcile job, so a refund can be delayed but never forgotten.
+   */
+  private async tryRefund(
+    attemptId: string,
+    providerRef: string,
+    amountCents: number,
+  ): Promise<{ ok: boolean; attempt: PaymentAttempt }> {
+    try {
+      const { refundRef } = await this.provider.refund(providerRef, amountCents);
+      return { ok: true, attempt: this.updateAttempt(attemptId, { status: 'refunded', refund_ref: refundRef }) };
+    } catch (err) {
+      this.log(`[payments] refund of ${providerRef} failed (${err instanceof Error ? err.message : String(err)}); parked for retry`);
+      return { ok: false, attempt: this.updateAttempt(attemptId, { status: 'refund_pending', failure_code: 'refund_failed' }) };
+    }
   }
 
   private setStatus(bookingId: string, status: BookingStatus, reason: string | null): Booking {
@@ -547,6 +644,15 @@ export class BookingService {
 
   private nowIso(): string {
     return this.now().toISOString();
+  }
+
+  private emit(change: BookingChange): void {
+    if (!this.onChange) return;
+    try {
+      this.onChange(change);
+    } catch (err) {
+      console.error('onChange listener failed', err);
+    }
   }
 }
 

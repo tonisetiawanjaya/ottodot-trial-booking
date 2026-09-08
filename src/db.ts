@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   trial_class_id TEXT NOT NULL REFERENCES trial_classes(id),
   status         TEXT NOT NULL CHECK (status IN (
                    'pending_payment', 'confirmed', 'payment_failed',
-                   'refunded', 'expired', 'cancelled')),
+                   'refunded', 'refund_pending', 'expired', 'cancelled')),
   status_reason  TEXT,
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL,
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS payment_attempts (
   booking_id   TEXT NOT NULL REFERENCES bookings(id),
   amount_cents INTEGER NOT NULL,
   currency     TEXT NOT NULL,
-  status       TEXT NOT NULL CHECK (status IN ('processing', 'succeeded', 'failed', 'refunded')),
+  status       TEXT NOT NULL CHECK (status IN ('processing', 'succeeded', 'failed', 'refunded', 'refund_pending')),
   provider_ref TEXT,
   failure_code TEXT,
   refund_ref   TEXT,
@@ -80,6 +80,27 @@ CREATE TABLE IF NOT EXISTS payment_attempts (
 
 CREATE INDEX IF NOT EXISTS ix_payment_attempts_booking
   ON payment_attempts (booking_id, created_at);
+
+-- Login accounts. A parent account points at its parents row; the admin account has none.
+CREATE TABLE IF NOT EXISTS accounts (
+  id            TEXT PRIMARY KEY,
+  username      TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role          TEXT NOT NULL CHECK (role IN ('parent', 'admin')),
+  parent_id     TEXT REFERENCES parents(id),
+  created_at    TEXT NOT NULL,
+  CHECK ((role = 'parent') = (parent_id IS NOT NULL))
+);
+
+-- Server-side sessions; the browser only holds the opaque id in an HttpOnly cookie.
+CREATE TABLE IF NOT EXISTS sessions (
+  id         TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id),
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_sessions_account ON sessions (account_id);
 
 -- Invariant 2: confirmed bookings never exceed class capacity.
 CREATE TRIGGER IF NOT EXISTS trg_capacity_on_insert
@@ -103,6 +124,14 @@ BEGIN
 END;
 `;
 
+/**
+ * Bump when the schema changes. The data is synthetic, so an on-disk file
+ * from an older version is simply rebuilt (and reseeded by the server) instead
+ * of migrated. A real deployment would use migrations here.
+ */
+export const SCHEMA_VERSION = 2;
+const TABLES_NEWEST_FIRST = ['sessions', 'accounts', 'payment_attempts', 'bookings', 'students', 'parents', 'trial_classes'];
+
 /** Open (and create if needed) a SQLite database with the schema applied. */
 export function openDb(path: string = ':memory:'): DB {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -110,7 +139,17 @@ export function openDb(path: string = ':memory:'): DB {
   db.exec('PRAGMA foreign_keys = ON');
   db.exec('PRAGMA busy_timeout = 5000');
   if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
+
+  const { user_version } = db.prepare('PRAGMA user_version').get() as { user_version: number };
+  const hasTables = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'bookings'").get();
+  if (hasTables && user_version !== SCHEMA_VERSION) {
+    console.warn(`[db] schema v${user_version} -> v${SCHEMA_VERSION}: rebuilding tables (synthetic data, will be reseeded)`);
+    db.exec('PRAGMA foreign_keys = OFF');
+    for (const table of TABLES_NEWEST_FIRST) db.exec(`DROP TABLE IF EXISTS ${table}`);
+    db.exec('PRAGMA foreign_keys = ON');
+  }
   db.exec(SCHEMA);
+  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   return db;
 }
 

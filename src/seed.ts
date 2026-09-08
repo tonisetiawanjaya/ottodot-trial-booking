@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import type { DB } from './db.ts';
 import { openDb } from './db.ts';
+import { hashPassword } from './auth.ts';
 
 /**
  * Small synthetic dataset. Everything the take-home asks to demonstrate is
@@ -12,15 +13,20 @@ import { openDb } from './db.ts';
  *   cls_math_p4_fractions  3/4 confirmed  -> "exactly 3 confirmed students": the last-seat class
  *   cls_sci_p6_electricity 4/4 confirmed  -> a full class (UI shows Full; API returns CLASS_FULL)
  *
- *   Duplicate attempt: book Ethan Tan into P4 Math again -> 409 DUPLICATE_BOOKING.
+ *   Duplicate attempt: log in as aisha and book Ethan Tan into P4 Math again -> 409 DUPLICATE_BOOKING.
+ *
+ * Logins: every parent has an account named after their first name with the
+ * password `parent123`; the admin account is `admin` / `admin123`.
  */
+export const DEMO_PASSWORDS = { parent: 'parent123', admin: 'admin123' } as const;
+
 export const SEED = {
   parents: [
-    { id: 'par_aisha', name: 'Aisha Tan', email: 'aisha.tan@example.com' },
-    { id: 'par_daniel', name: 'Daniel Lim', email: 'daniel.lim@example.com' },
-    { id: 'par_priya', name: 'Priya Nair', email: 'priya.nair@example.com' },
-    { id: 'par_wei', name: 'Wei Chen', email: 'wei.chen@example.com' },
-    { id: 'par_maria', name: 'Maria Santos', email: 'maria.santos@example.com' },
+    { id: 'par_aisha', name: 'Aisha Tan', email: 'aisha.tan@example.com', username: 'aisha' },
+    { id: 'par_daniel', name: 'Daniel Lim', email: 'daniel.lim@example.com', username: 'daniel' },
+    { id: 'par_priya', name: 'Priya Nair', email: 'priya.nair@example.com', username: 'priya' },
+    { id: 'par_wei', name: 'Wei Chen', email: 'wei.chen@example.com', username: 'wei' },
+    { id: 'par_maria', name: 'Maria Santos', email: 'maria.santos@example.com', username: 'maria' },
   ],
   students: [
     { id: 'stu_ethan', parent_id: 'par_aisha', name: 'Ethan Tan', grade: 'P4' },
@@ -54,13 +60,35 @@ export const SEED = {
   ],
 };
 
+// scrypt is deliberately slow (~50 ms). The seed hashes each distinct demo
+// password once per process; real sign-ups would get their own random salt.
+const hashCache = new Map<string, string>();
+function hashFor(password: string): string {
+  let hash = hashCache.get(password);
+  if (!hash) {
+    hash = hashPassword(password);
+    hashCache.set(password, hash);
+  }
+  return hash;
+}
+
 export function seed(db: DB, now: Date = new Date()): void {
   db.exec('BEGIN IMMEDIATE');
   try {
-    db.exec('DELETE FROM payment_attempts; DELETE FROM bookings; DELETE FROM students; DELETE FROM parents; DELETE FROM trial_classes;');
+    db.exec(
+      'DELETE FROM sessions; DELETE FROM accounts; DELETE FROM payment_attempts; DELETE FROM bookings; DELETE FROM students; DELETE FROM parents; DELETE FROM trial_classes;',
+    );
+    const nowIso = now.toISOString();
 
     const insParent = db.prepare('INSERT INTO parents (id, name, email) VALUES (?, ?, ?)');
-    for (const p of SEED.parents) insParent.run(p.id, p.name, p.email);
+    const insAccount = db.prepare(
+      'INSERT INTO accounts (id, username, password_hash, role, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    );
+    for (const p of SEED.parents) {
+      insParent.run(p.id, p.name, p.email);
+      insAccount.run(`acc_${p.username}`, p.username, hashFor(DEMO_PASSWORDS.parent), 'parent', p.id, nowIso);
+    }
+    insAccount.run('acc_admin', 'admin', hashFor(DEMO_PASSWORDS.admin), 'admin', null, nowIso);
 
     const insStudent = db.prepare('INSERT INTO students (id, parent_id, name, grade) VALUES (?, ?, ?, ?)');
     for (const s of SEED.students) insStudent.run(s.id, s.parent_id, s.name, s.grade);
@@ -108,8 +136,17 @@ export function seed(db: DB, now: Date = new Date()): void {
 }
 
 export function isSeeded(db: DB): boolean {
-  const row = db.prepare('SELECT COUNT(*) AS n FROM parents').get() as { n: number };
-  return row.n > 0;
+  const parents = db.prepare('SELECT COUNT(*) AS n FROM parents').get() as { n: number };
+  const accounts = db.prepare('SELECT COUNT(*) AS n FROM accounts').get() as { n: number };
+  return parents.n > 0 && accounts.n > 0;
+}
+
+export function printSeedSummary(): void {
+  console.log('  cls_sci_p5_forces       0/4 confirmed (available; Lucas Lim has a declined payment)');
+  console.log('  cls_math_p4_fractions   3/4 confirmed (one seat left: the last-seat class)');
+  console.log('  cls_sci_p6_electricity  4/4 confirmed (full)');
+  console.log(`  parent logins           ${SEED.parents.map((p) => p.username).join(', ')}  (password: ${DEMO_PASSWORDS.parent})`);
+  console.log(`  admin login             admin  (password: ${DEMO_PASSWORDS.admin})`);
 }
 
 // CLI: `npm run seed` resets the on-disk database to the seed state.
@@ -119,8 +156,6 @@ if (isMain) {
   const db = openDb(path);
   seed(db);
   console.log(`Seeded ${path}`);
-  console.log('  cls_sci_p5_forces       0/4 confirmed (available; Lucas Lim has a declined payment)');
-  console.log('  cls_math_p4_fractions   3/4 confirmed (one seat left: the last-seat class)');
-  console.log('  cls_sci_p6_electricity  4/4 confirmed (full)');
+  printSeedSummary();
   db.close();
 }

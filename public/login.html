@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ottodot · Log in</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Ottodot <span>Trial class booking</span></div>
+  </header>
+
+  <main class="container login">
+    <section class="card">
+      <h2>Log in</h2>
+      <p class="muted small">Book a trial class for your child. Trial classes are capped at 4 students.</p>
+      <form id="login-form" autocomplete="on">
+        <label>Username
+          <input id="username" name="username" type="text" autocomplete="username" required autofocus />
+        </label>
+        <label>Password
+          <input id="password" name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <p id="login-error" class="error" hidden></p>
+        <div class="actions">
+          <button id="login-btn" class="primary" type="submit">Log in</button>
+        </div>
+      </form>
+    </section>
+
+    <details class="card demo">
+      <summary>Demo accounts</summary>
+      <p class="muted small">This is a demo environment with a mock payment provider; no real cards are charged.</p>
+      <table>
+        <thead><tr><th>Username</th><th>Password</th><th>Who</th></tr></thead>
+        <tbody>
+          <tr><td><code>maria</code></td><td><code>parent123</code></td><td>Maria Santos: Sofia (P4)</td></tr>
+          <tr><td><code>daniel</code></td><td><code>parent123</code></td><td>Daniel Lim: Lucas (P5), Ben (P6)</td></tr>
+          <tr><td><code>aisha</code></td><td><code>parent123</code></td><td>Aisha Tan: Ethan (P4, already in P4 Math), Chloe (P6)</td></tr>
+          <tr><td><code>priya</code></td><td><code>parent123</code></td><td>Priya Nair: Ravi (P4), Arjun (P6)</td></tr>
+          <tr><td><code>wei</code></td><td><code>parent123</code></td><td>Wei Chen: Mei (P4), Hana (P6)</td></tr>
+          <tr><td><code>admin</code></td><td><code>admin123</code></td><td>Ottodot staff: class rosters</td></tr>
+        </tbody>
+      </table>
+    </details>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="/shared.js"></script>
+  <script src="/login.js"></script>
+</body>
+</html>

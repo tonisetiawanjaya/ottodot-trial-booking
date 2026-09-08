@@ -9,18 +9,19 @@
 <body>
   <header class="topbar">
     <div class="brand">Ottodot <span>Trial class rosters (admin / teacher)</span></div>
-    <nav><a href="/">← Parent booking</a></nav>
+    <nav id="user-nav" class="user-nav"></nav>
   </header>
 
-  <main class="container">
+  <main class="container" id="app" hidden>
     <section class="card">
       <div class="roster-head">
         <div>
           <h2>Rosters</h2>
-          <p class="muted small">Only <strong>confirmed</strong> bookings count toward the 4-seat cap. Auto-refreshes every 3 seconds.</p>
+          <p class="muted small">Only <strong>confirmed</strong> bookings count toward the 4-seat cap. Updates live as parents book and pay.</p>
         </div>
         <div class="actions" style="margin: 0">
           <button id="expire-btn" class="small">Run expiry job now</button>
+          <button id="refunds-btn" class="small">Retry pending refunds</button>
           <span id="updated" class="muted small"></span>
         </div>
       </div>
@@ -29,6 +30,7 @@
   </main>
 
   <div id="toast" class="toast"></div>
+  <script src="/shared.js"></script>
   <script src="/admin.js"></script>
 </body>
 </html>

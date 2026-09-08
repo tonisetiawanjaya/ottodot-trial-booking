@@ -1,28 +1,7 @@
-/* Admin / teacher view: confirmed roster per trial class, plus who is mid-checkout. */
+/* Admin / teacher view: confirmed roster per trial class, plus who is mid-checkout. Updates live over SSE.
+   Shared helpers ($, api, when, esc, friendly, toast, requireRole, renderUserNav, connectLive) come from shared.js. */
 
-const $ = (sel) => document.querySelector(sel);
-const when = (iso) =>
-  iso ? new Date(iso).toLocaleString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
-const esc = (s) =>
-  String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-
-async function api(path, body) {
-  const res = await fetch(
-    path,
-    body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined,
-  );
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error?.message || res.statusText);
-  return data;
-}
-
-function toast(msg, tone = 'ok') {
-  const el = $('#toast');
-  el.textContent = msg;
-  el.className = `toast ${tone} show`;
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => el.classList.remove('show'), 4000);
-}
+const POLL_MS = 15000;
 
 async function refresh() {
   const rosters = await api('/api/admin/roster');
@@ -66,7 +45,16 @@ async function refresh() {
       </section>`;
     })
     .join('');
-  $('#updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  $('#updated').textContent = `Updated ${new Date().toLocaleTimeString('en-SG', { timeZone: 'Asia/Singapore' })} SGT`;
+}
+
+async function safeRefresh() {
+  try {
+    await refresh();
+  } catch (err) {
+    if (err.status === 401) location.replace('/login?next=%2Fadmin');
+    else toast(friendly(err));
+  }
 }
 
 $('#rosters').addEventListener('click', async (e) => {
@@ -74,23 +62,40 @@ $('#rosters').addEventListener('click', async (e) => {
   if (!btn) return;
   if (!confirm(`Cancel ${btn.dataset.name}'s confirmed seat? The seat is released and the payment refunded.`)) return;
   try {
-    await api(`/api/bookings/${btn.dataset.cancel}/cancel`, { reason: 'cancelled_by_admin' });
-    toast('Booking cancelled and seat released.');
+    await api(`/api/bookings/${btn.dataset.cancel}/cancel`, {});
+    toast('Booking cancelled and seat released.', 'ok');
   } catch (err) {
-    toast(err.message, 'bad');
+    toast(friendly(err));
   }
-  await refresh();
+  await safeRefresh();
 });
 
 $('#expire-btn').addEventListener('click', async () => {
   try {
     const { expired } = await api('/api/admin/jobs/expire-pending', {});
-    toast(`Expiry job ran: ${expired} pending booking(s) released.`);
+    toast(`Expiry job ran: ${expired} pending booking(s) released.`, 'ok');
   } catch (err) {
-    toast(err.message, 'bad');
+    toast(friendly(err));
   }
-  await refresh();
+  await safeRefresh();
 });
 
-refresh().catch((err) => toast(err.message, 'bad'));
-setInterval(() => refresh().catch(() => {}), 3000);
+$('#refunds-btn').addEventListener('click', async () => {
+  try {
+    const r = await api('/api/admin/jobs/retry-refunds', {});
+    toast(`Refund job ran: ${r.refunded} completed, ${r.still_pending} still pending.`, 'ok');
+  } catch (err) {
+    toast(friendly(err));
+  }
+  await safeRefresh();
+});
+
+(async () => {
+  const me = await requireRole('admin');
+  if (!me) return;
+  renderUserNav(me);
+  await safeRefresh();
+  $('#app').hidden = false;
+  connectLive(() => safeRefresh());
+  setInterval(safeRefresh, POLL_MS);
+})().catch((err) => toast(friendly(err)));

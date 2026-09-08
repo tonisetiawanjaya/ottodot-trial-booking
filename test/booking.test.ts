@@ -256,6 +256,59 @@ describe('idempotency', () => {
   });
 });
 
+describe('refund reconciliation (provider outage)', () => {
+  it('parks a lost-race refund as refund_pending and completes it when the job retries', async () => {
+    const provider = new ControlledProvider();
+    provider.refundFailuresRemaining = 1;
+    const { service, db } = makeService(provider);
+    const a = service.createBooking({ studentId: IDS.sofia, trialClassId: IDS.fractions }).booking;
+    const b = service.createBooking({ studentId: IDS.lucas, trialClassId: IDS.fractions }).booking;
+    const payA = service.pay({ bookingId: a.id, card: CARD_OK });
+    const payB = service.pay({ bookingId: b.id, card: CARD_OK });
+    provider.settle(b.id);
+    assert.equal((await payB).outcome, 'confirmed');
+
+    provider.settle(a.id);
+    const resA = await payA;
+    assert.equal(resA.outcome, 'refund_pending');
+    assert.equal(resA.booking.status, 'refund_pending');
+    assert.equal(resA.booking.status_reason, 'seat_taken');
+    assert.equal(resA.attempt?.status, 'refund_pending');
+    assert.equal(resA.attempt?.failure_code, 'refund_failed');
+    assert.equal(provider.refunds.length, 0, 'provider was down');
+    assert.equal(confirmedCount(db, IDS.fractions), 4, 'seat outcome is unaffected');
+    assert.equal(service.getRoster(IDS.fractions).pending.length, 0);
+    await assert.rejects(service.pay({ bookingId: a.id, card: CARD_OK }), (err: AppError) => err.code === 'BOOKING_NOT_PAYABLE');
+
+    const job = await service.retryPendingRefunds();
+    assert.deepEqual(job, { retried: 1, refunded: 1, still_pending: 0 });
+    assert.equal(service.getBooking(a.id)?.status, 'refunded');
+    assert.equal(service.getBooking(a.id)?.status_reason, 'seat_taken');
+    const attempt = service.getBookingDetail(a.id).payment_attempts[0];
+    assert.equal(attempt.status, 'refunded');
+    assert.ok(attempt.refund_ref);
+    assert.equal(provider.refunds.length, 1);
+    assert.deepEqual(await service.retryPendingRefunds(), { retried: 0, refunded: 0, still_pending: 0 });
+  });
+
+  it('keeps a cancelled booking cancelled (seat released) while its refund waits for the job', async () => {
+    const provider = new ControlledProvider();
+    provider.refundFailuresRemaining = 2;
+    const { service } = makeService(provider);
+    const cancelled = await service.cancelBooking('bk_chloe_elec', 'cancelled_by_admin');
+    assert.equal(cancelled.status, 'cancelled');
+    assert.equal(service.getTrialClass(IDS.electricity)!.seats_available, 1, 'seat released immediately');
+    assert.equal(service.getBookingDetail('bk_chloe_elec').payment_attempts[0].status, 'refund_pending');
+    const row = service.listBookingsForParent(IDS.aisha).find((b) => b.id === 'bk_chloe_elec');
+    assert.equal(row?.payment_status, 'refund_pending', 'parent UI can say "refund in progress"');
+
+    assert.deepEqual(await service.retryPendingRefunds(), { retried: 1, refunded: 0, still_pending: 1 }, 'provider still down');
+    assert.deepEqual(await service.retryPendingRefunds(), { retried: 1, refunded: 1, still_pending: 0 }, 'provider back');
+    assert.equal(service.getBookingDetail('bk_chloe_elec').payment_attempts[0].status, 'refunded');
+    assert.equal(service.getBooking('bk_chloe_elec')?.status, 'cancelled');
+  });
+});
+
 describe('validation', () => {
   it('404s on unknown student, class or booking', async () => {
     const { service } = makeService();

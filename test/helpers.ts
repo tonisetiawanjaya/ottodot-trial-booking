@@ -1,10 +1,13 @@
 import { openDb, type DB } from '../src/db.ts';
-import { seed } from '../src/seed.ts';
+import { DEMO_PASSWORDS, seed } from '../src/seed.ts';
 import { MockPaymentProvider, type ChargeRequest, type ChargeResult, type PaymentProvider } from '../src/payments.ts';
 import { BookingService } from '../src/booking-service.ts';
+import { AuthService } from '../src/auth.ts';
+import { LiveHub } from '../src/server.ts';
 
 export const CARD_OK = '4242424242424242';
 export const CARD_DECLINED = '4000000000000002';
+export const PASSWORDS = DEMO_PASSWORDS;
 
 /** Fixed "now" so seeded timestamps and TTLs are deterministic. */
 export const T0 = new Date('2026-09-08T09:00:00.000Z');
@@ -35,8 +38,15 @@ export function makeService<P extends PaymentProvider = MockPaymentProvider>(pro
   const clock = { now: new Date(T0) };
   seed(db, clock.now);
   const p = (provider ?? new MockPaymentProvider()) as P;
-  const service = new BookingService(db, p, { now: () => clock.now, pendingTtlMinutes: 15 });
-  return { db, clock, provider: p, service };
+  const live = new LiveHub();
+  const service = new BookingService(db, p, {
+    now: () => clock.now,
+    pendingTtlMinutes: 15,
+    onChange: (change) => live.broadcast(change),
+    log: () => {},
+  });
+  const auth = new AuthService(db, { now: () => clock.now });
+  return { db, clock, provider: p, service, auth, live };
 }
 
 /**
@@ -47,6 +57,8 @@ export class ControlledProvider implements PaymentProvider {
   private pending = new Map<string, (r: ChargeResult) => void>();
   charges: ChargeRequest[] = [];
   refunds: Array<{ providerRef: string; amountCents: number }> = [];
+  /** Make the next N refund calls throw, simulating a provider outage. */
+  refundFailuresRemaining = 0;
 
   charge(req: ChargeRequest): Promise<ChargeResult> {
     this.charges.push(req);
@@ -54,6 +66,10 @@ export class ControlledProvider implements PaymentProvider {
   }
 
   async refund(providerRef: string, amountCents: number): Promise<{ refundRef: string }> {
+    if (this.refundFailuresRemaining > 0) {
+      this.refundFailuresRemaining--;
+      throw new Error('refund provider unavailable');
+    }
     this.refunds.push({ providerRef, amountCents });
     return { refundRef: `re_${this.refunds.length}` };
   }
