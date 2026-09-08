@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ottodot · Book a trial class</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Ottodot <span>Trial class booking</span></div>
+    <nav><a href="/admin">Admin roster →</a></nav>
+  </header>
+
+  <main class="container">
+    <section class="card" id="step-who">
+      <h2>1. Who is booking?</h2>
+      <label>Signed in as (demo: pick a parent)
+        <select id="parent"></select>
+      </label>
+      <div id="children" class="chips"></div>
+    </section>
+
+    <section class="card" id="step-class">
+      <h2>2. Pick a trial class</h2>
+      <p class="muted small">Trial classes are capped at 4 students. A seat is only taken once payment succeeds.</p>
+      <div id="classes" class="classes"></div>
+    </section>
+
+    <section class="card" id="step-pay" hidden>
+      <h2>3. Payment</h2>
+      <div id="pay-summary"></div>
+      <label>Test card
+        <select id="card"></select>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="slow" />
+        Simulate a slow payment network (4 s). Use two tabs to reproduce the last-seat race.
+      </label>
+      <div class="actions">
+        <button id="pay-btn" class="primary">Pay</button>
+        <button id="cancel-btn" class="ghost">Cancel booking</button>
+        <span id="pay-progress" class="muted small" hidden>Processing payment…</span>
+      </div>
+    </section>
+
+    <section class="card" id="step-result" hidden>
+      <h2>Booking status</h2>
+      <div id="result"></div>
+      <div class="actions">
+        <button id="again-btn" class="ghost">Book another class</button>
+      </div>
+    </section>
+
+    <section class="card" id="my-bookings">
+      <h2>Bookings for this family</h2>
+      <table>
+        <thead>
+          <tr><th>Child</th><th>Class</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody id="bookings"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

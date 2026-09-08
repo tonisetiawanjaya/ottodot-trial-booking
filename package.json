@@ -1,0 +1,22 @@
+{
+  "name": "ottodot-trial-booking",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ottodot take-home: a small, correct trial-class booking slice (4-seat cap, payment, last-seat race).",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning src/server.ts",
+    "dev": "node --watch --no-warnings=ExperimentalWarning src/server.ts",
+    "seed": "node --no-warnings=ExperimentalWarning src/seed.ts --reset",
+    "test": "node --test --no-warnings=ExperimentalWarning \"test/**/*.test.ts\"",
+    "demo:race": "node --no-warnings=ExperimentalWarning scripts/demo-race.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
