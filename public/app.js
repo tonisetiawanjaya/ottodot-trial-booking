@@ -223,7 +223,7 @@ $('#pay-btn').addEventListener('click', async () => {
   try {
     const r = await api(`/api/bookings/${state.booking.id}/pay`, {
       card: $('#card').value,
-      delay_ms: $('#slow').checked ? 4000 : 0,
+      delay_ms: $("#slow").checked ? 8000 : 0,
     });
     showResult(r);
   } catch (err) {

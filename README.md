@@ -15,7 +15,7 @@ The interesting part is not the UI but the invariants:
 | A refund the provider fails to process is never forgotten | attempt parked as `refund_pending`, retried by a job |
 | A parent can only act on their own children and bookings | session + ownership checks in the HTTP layer |
 
-**Stack:** Node.js (≥ 22.18, tested on 24) + TypeScript, SQLite via the built-in `node:sqlite`, a ~250-line HTTP layer over `node:http` (router, cookie sessions, Server-Sent Events, static files), vanilla HTML/JS. **Zero runtime dependencies**, so `npm start` works without `npm install`.
+**Stack:** Node.js (≥ 22.13, tested on 24) + TypeScript, SQLite via the built-in `node:sqlite`, a ~250-line HTTP layer over `node:http` (router, cookie sessions, Server-Sent Events, static files), vanilla HTML/JS. **Zero runtime dependencies**, so `npm start` works without `npm install`.
 
 ---
 
@@ -53,7 +53,7 @@ The same list is under "Demo accounts" on the login page. Sessions are cookies, 
 ### 90-second reviewer path
 
 1. `npm run demo:race` — prints the race step by step and checks the invariant.
-2. `npm start`. Browser 1: log in as **maria** → Sofia → **P4 Math** (1 seat left) → Book trial → tick *Simulate a slow payment network* → Pay. Browser 2 (within 4 s): log in as **daniel** → Lucas → **P4 Math** → Book trial → Pay.
+2. `npm start`. Browser 1: log in as **maria** → Sofia → **P4 Math** (1 seat left) → Book trial → tick *Simulate a slow payment network* → Pay. Browser 2 (within 8 s): log in as **daniel** → Lucas → **P4 Math** → Book trial → Pay.
    - Browser 2 shows **Confirmed**; browser 1's page flips to "the last seat was just taken" the same instant (live update), then shows **Refunded** when its payment completes.
    - A third window logged in as **admin** shows P4 Math go to 4/4 with Lucas, not Sofia, without a refresh.
 3. Other seeded cases: **aisha** → Ethan → P4 Math gives a duplicate error (Ethan is already confirmed); P6 Science is **Full**; **daniel**'s list shows Lucas's earlier **payment failed** booking; pay with the *declined* test card to reproduce it.
@@ -81,7 +81,7 @@ About **1 h 45 min of wall-clock time**, in one sitting on 8 September 2026, wor
 | 3. Login + live updates | accounts, sessions, ownership checks, SSE | 25 min |
 | 4. Hardening + docs | refund reconciliation job, README and AI_USAGE, end-to-end verification | 30 min |
 
-The brief asks for pass 1 only. Passes 2–4 were done *after* the core was complete, tested and committed, so that the race can be shown across two genuinely separate sessions; they are not a substitute for the correctness work. The first commit (`a6dfb01`) is exactly the pass-1 scope if you prefer to evaluate that.
+The brief asks for pass 1 only. Passes 2–4 were done *after* the core was complete, tested and committed, so that the race can be shown across two genuinely separate sessions; they are not a substitute for the correctness work. The first commit (`fd111e2`) is exactly the pass-1 scope if you prefer to evaluate that.
 
 ### Assumptions
 
