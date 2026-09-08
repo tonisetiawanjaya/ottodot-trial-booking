@@ -21,6 +21,8 @@ The interesting part is not the UI but the invariants:
 
 ## Run it
 
+**Requirements: Node.js 22.13 or newer (24 recommended; an `.nvmrc` is included).** Two built-in features do the work that dependencies usually do: `node:sqlite` (built in since 22.13) and TypeScript type stripping (22.6+ behind `--experimental-strip-types`, which every script passes; default since 22.18). Each `npm` script checks the version first and prints exactly what to do if it is too old. No `npm install` is needed to run or test.
+
 ```bash
 npm start            # seeds data/ottodot.sqlite on first run, serves http://localhost:3000
 npm test             # 49 tests (node:test), ~1.5 s
@@ -28,6 +30,8 @@ npm run demo:race    # narrated CLI walkthrough of the last-seat race + other ed
 npm run seed         # reset the on-disk database to the seed state
 npm install && npm run typecheck   # optional: dev-only deps (typescript, @types/node)
 ```
+
+Without a suitable Node on the host, use Docker: `docker build -t ottodot . && docker run -p 3000:3000 ottodot`.
 
 - Log in: <http://localhost:3000/login>
 - Parent UI: <http://localhost:3000/> · Admin/teacher roster: <http://localhost:3000/admin>
@@ -254,7 +258,7 @@ npm test
 
 Tests use an in-memory SQLite database, the real seed, and an injected clock. `ControlledProvider` in [test/helpers.ts](test/helpers.ts) lets a test decide exactly when each user's payment completes and whether the provider's refund endpoint is up, which is what makes the race and the outage deterministic.
 
-Manual verification: the two-browser flow under *90-second reviewer path*, and `npm run demo:race`.
+Manual verification: the two-browser flow under *90-second reviewer path*, and `npm run demo:race`. The suite was also run from a clean `git clone` on Node 24.15, and an external audit of an earlier export on Node 22.16 is what prompted the explicit version check and flags above.
 
 ---
 

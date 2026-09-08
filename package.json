@@ -5,15 +5,19 @@
   "description": "Ottodot take-home: a small, correct trial-class booking slice (4-seat cap, payment, last-seat race).",
   "type": "module",
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.13"
   },
   "scripts": {
-    "start": "node --no-warnings=ExperimentalWarning src/server.ts",
-    "dev": "node --watch --no-warnings=ExperimentalWarning src/server.ts",
-    "seed": "node --no-warnings=ExperimentalWarning src/seed.ts --reset",
-    "test": "node --test --no-warnings=ExperimentalWarning \"test/**/*.test.ts\"",
-    "demo:race": "node --no-warnings=ExperimentalWarning scripts/demo-race.ts",
-    "typecheck": "tsc --noEmit"
+    "prestart": "node scripts/check-node.mjs",
+    "start": "node --experimental-strip-types --no-warnings=ExperimentalWarning src/server.ts",
+    "dev": "node --watch --experimental-strip-types --no-warnings=ExperimentalWarning src/server.ts",
+    "preseed": "node scripts/check-node.mjs",
+    "seed": "node --experimental-strip-types --no-warnings=ExperimentalWarning src/seed.ts --reset",
+    "pretest": "node scripts/check-node.mjs",
+    "test": "node --test --experimental-strip-types --no-warnings=ExperimentalWarning \"test/**/*.test.ts\"",
+    "demo:race": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/demo-race.ts",
+    "typecheck": "tsc --noEmit",
+    "check-node": "node scripts/check-node.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
