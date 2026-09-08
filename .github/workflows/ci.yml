@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The declared floor and the recommended version. 22.13 is the first
+        # release with node:sqlite built in; type stripping is enabled by the
+        # --experimental-strip-types flag the npm scripts pass.
+        node: ['22.13', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # Deliberately before any install: the app and its tests have zero
+      # runtime dependencies, and this proves it.
+      - name: Run tests with nothing installed
+        run: npm test
+
+      - name: Install dev-only dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Last-seat race demo
+        run: npm run demo:race

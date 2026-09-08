@@ -2,6 +2,8 @@
 
 > **Video walkthrough:** _link to be added before submission_
 
+[![CI](https://github.com/tonisetiawanjaya/ottodot-trial-booking/actions/workflows/ci.yml/badge.svg)](https://github.com/tonisetiawanjaya/ottodot-trial-booking/actions/workflows/ci.yml)
+
 A small, correct slice of a trial-class booking system: a parent logs in, picks a child and a trial class, pays (mock), and sees the booking status; a teacher/admin logs in and sees the roster update live. Trial classes are capped at 4 confirmed students.
 
 The interesting part is not the UI but the invariants:
@@ -31,7 +33,7 @@ npm run seed         # reset the on-disk database to the seed state
 npm install && npm run typecheck   # optional: dev-only deps (typescript, @types/node)
 ```
 
-Without a suitable Node on the host, use Docker: `docker build -t ottodot . && docker run -p 3000:3000 ottodot`.
+Two zero-install routes if the host has no suitable Node. Open the repo in **GitHub Codespaces** (green *Code* button, *Codespaces* tab, *Create codespace on main*): Node is pinned to 24, the test suite runs once while the container builds, and port 3000 is forwarded, so `npm start` gives you the app in a browser tab. Or build the included image: `docker build -t ottodot . && docker run -p 3000:3000 ottodot`.
 
 - Log in: <http://localhost:3000/login>
 - Parent UI: <http://localhost:3000/> · Admin/teacher roster: <http://localhost:3000/admin>
@@ -258,7 +260,7 @@ npm test
 
 Tests use an in-memory SQLite database, the real seed, and an injected clock. `ControlledProvider` in [test/helpers.ts](test/helpers.ts) lets a test decide exactly when each user's payment completes and whether the provider's refund endpoint is up, which is what makes the race and the outage deterministic.
 
-Manual verification: the two-browser flow under *90-second reviewer path*, and `npm run demo:race`. The suite was also run from a clean `git clone` on Node 24.15, and an external audit of an earlier export on Node 22.16 is what prompted the explicit version check and flags above.
+Manual verification: the two-browser flow under *90-second reviewer path*, and `npm run demo:race`. Every push runs the suite on GitHub Actions against **both** Node 22.13 (the declared floor) and Node 24, with the tests executed before any `npm install` so the zero-dependency claim is checked rather than asserted; the badge at the top is that run. An external audit of an earlier export on Node 22.16 is what prompted the explicit version check and flags above. The suite was also run from a clean `git clone` on Node 24.15, and an external audit of an earlier export on Node 22.16 is what prompted the explicit version check and flags above.
 
 ---
 
@@ -305,4 +307,6 @@ public/                login (login.html/js), parent UI (index.html, app.js), ad
 test/                  node:test suites + helpers (ControlledProvider, fixed clock)
 scripts/demo-race.ts   narrated CLI demo
 AI_USAGE.md            how AI tools were used
+.devcontainer/         Codespaces: Node 24, port 3000 forwarded, tests run on first boot
+.github/workflows/     CI: tests + typecheck on Node 22.13 and 24
 ```
