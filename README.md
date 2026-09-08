@@ -52,7 +52,7 @@ The same list is under "Demo accounts" on the login page. Sessions are cookies, 
 
 ### 90-second reviewer path
 
-1. `npm run demo:race` — prints the race step by step and checks the invariant.
+1. `npm run demo:race` prints the race step by step and checks the invariant.
 2. `npm start`. Browser 1: log in as **maria** → Sofia → **P4 Math** (1 seat left) → Book trial → tick *Simulate a slow payment network* → Pay. Browser 2 (within 8 s): log in as **daniel** → Lucas → **P4 Math** → Book trial → Pay.
    - Browser 2 shows **Confirmed**; browser 1's page flips to "the last seat was just taken" the same instant (live update), then shows **Refunded** when its payment completes.
    - A third window logged in as **admin** shows P4 Math go to 4/4 with Lucas, not Sofia, without a refresh.
@@ -64,7 +64,7 @@ The same list is under "Demo accounts" on the login page. Sessions are cookies, 
 
 - **Parent flow**: pick a child → pick an available class → submit booking (`pending_payment`) → mock payment → status page. One screen per step. Your bookings and statuses are listed and an unpaid booking can be resumed. Times are shown in SGT; API error codes are mapped to parent-friendly copy.
 - **Mock payment**: Stripe-style test cards (`…4242` succeeds, `…0002` declined, `…9995` insufficient funds). Every attempt is recorded in `payment_attempts`, including refunds and refunds that are still owed. A "slow network" toggle exists purely to make the race reproducible by hand.
-- **Roster**: `/admin` page and `GET /api/admin/roster` — confirmed students per class, plus who is mid-checkout (explicitly *not* on the roster). Admin can cancel a booking (frees the seat, refunds) and run the background jobs by hand.
+- **Roster**: `/admin` page and `GET /api/admin/roster`: confirmed students per class, plus who is mid-checkout (explicitly *not* on the roster). Admin can cancel a booking (frees the seat, refunds) and run the background jobs by hand.
 - **Login**: username/password accounts for parents and one admin, scrypt password hashes, server-side sessions in an HttpOnly cookie. A parent can only book, pay for, view and cancel bookings for their own children.
 - **Live updates**: every committed booking change is pushed to every open page over Server-Sent Events, so seat counts, the roster and the payment step's "seat just taken" notice change the moment another family books, pays, or is refunded. A slow poll (15 s) backs it up.
 - **Background jobs** (once a minute, also callable via API): expire pending bookings older than 15 minutes; retry refunds the provider failed to process.
@@ -180,7 +180,7 @@ The service layer ([src/booking-service.ts](src/booking-service.ts)) is the API;
 
 1. **Service**: `createBooking` runs in a write transaction; if the child already has an *active* booking for the class it either returns the existing pending one (double-submit → resume checkout) or throws `409 DUPLICATE_BOOKING` (already confirmed).
 2. **Database**: the partial unique index makes a second active row impossible, whatever the code does; the constraint error is mapped to the same 409.
-3. **Confirmation time**: `claimSeat` runs `UPDATE … SET status='confirmed'` — if that ever hit the unique index, the booking is refunded instead of confirmed.
+3. **Confirmation time**: `claimSeat` runs `UPDATE … SET status='confirmed'`. If that ever hit the unique index, the booking is refunded instead of confirmed.
 
 ### How payment failure is handled
 
@@ -202,22 +202,22 @@ B: createBooking ─▶ pending          B: charge ─▶ ok ─▶ claimSeat: 3
 
 Concretely, in [src/booking-service.ts](src/booking-service.ts) `pay()`:
 
-1. **Fail fast** — if the class is already full before we charge, the booking is cancelled (`class_full_before_payment`) and the card is never touched. This closes the common case (B finished well before A pressed Pay) at zero cost. The live update makes it even more common: A's page shows "the last seat was just taken" before A presses Pay.
-2. **Charge** — awaits the provider. This is the only place two competing requests interleave.
-3. **Claim** — `claimSeat()` opens `BEGIN IMMEDIATE` (SQLite's writer lock), re-reads the booking, counts confirmed seats, and flips the row to `confirmed`. Because the transaction holds the write lock and the block is synchronous, no other confirmation can slip between the count and the update. If the count is already at capacity, it returns `seat_taken` without writing.
-4. **Refund** — the loser's charge is refunded, the attempt is marked `refunded`, the booking becomes `refunded` with `status_reason = seat_taken`. The roster never saw it. If the refund call fails, see *Refunds that fail* above.
+1. **Fail fast.** If the class is already full before we charge, the booking is cancelled (`class_full_before_payment`) and the card is never touched. This closes the common case (B finished well before A pressed Pay) at zero cost. The live update makes it even more common: A's page shows "the last seat was just taken" before A presses Pay.
+2. **Charge.** This awaits the provider, and is the only place two competing requests interleave.
+3. **Claim.** `claimSeat()` opens `BEGIN IMMEDIATE` (SQLite's writer lock), re-reads the booking, counts confirmed seats, and flips the row to `confirmed`. Because the transaction holds the write lock and the block is synchronous, no other confirmation can slip between the count and the update. If the count is already at capacity, it returns `seat_taken` without writing.
+4. **Refund.** The loser's charge is refunded, the attempt is marked `refunded`, the booking becomes `refunded` with `status_reason = seat_taken`. The roster never saw it. If the refund call fails, see *Refunds that fail* above.
 
 Even if step 3's application logic were wrong, the capacity trigger would abort the `UPDATE` and the code treats that abort as `seat_taken`. [test/last-seat-race.test.ts](test/last-seat-race.test.ts) scripts the exact interleaving from the brief with a controllable provider (B settles first, then A), the symmetric case, the fail-fast case, a declined winner, and a 12-way burst for one seat; [test/api.test.ts](test/api.test.ts) repeats it over real HTTP with two logged-in families and two concurrent requests.
 
 **Why this approach**
 
-- The seat is granted at the only moment that matters — when money has actually moved — so `confirmed` is always backed by a successful charge, and a pending or failed booking can never occupy a seat.
+- The seat is granted at the only moment that matters, when money has actually moved, so `confirmed` is always backed by a successful charge, and a pending or failed booking can never occupy a seat.
 - The critical section is one short transaction on one row group; it needs no distributed lock, queue, or counter column that can drift.
 - The hard invariants live in the schema, so a second process, a hotfix script, or a future bug cannot exceed capacity or double-book.
 
 **Tradeoffs I accepted**
 
-- **A user can be charged and then refunded.** The fail-fast check and the live "seat just taken" notice make this rare (only when B confirms *during* A's provider round-trip), but it can happen. The alternative — holding a seat while the user pays — was deliberately not chosen: with only 4 seats, abandoned checkouts would block real parents for the length of the hold, and a hold *still* needs the same atomic claim at the end. If refunds turned out to be frequent, I would add a short hold (5 min, counted in `seats_available`) on top of this design rather than instead of it.
+- **A user can be charged and then refunded.** The fail-fast check and the live "seat just taken" notice make this rare (only when B confirms *during* A's provider round-trip), but it can happen. The alternative, holding a seat while the user pays, was deliberately not chosen: with only 4 seats, abandoned checkouts would block real parents for the length of the hold, and a hold *still* needs the same atomic claim at the end. If refunds turned out to be frequent, I would add a short hold (5 min, counted in `seats_available`) on top of this design rather than instead of it.
 - **Pending bookings are not reflected in availability**, so two parents can both start paying for one seat. The UI says so ("a seat is only taken once payment succeeds").
 - **SQLite serializes all writers**, which makes the transaction trivially correct but means one writer at a time. On Postgres the same code needs one line more: `SELECT … FROM trial_classes WHERE id = ? FOR UPDATE` at the top of `claimSeat` (a per-class row lock), or `SERIALIZABLE` with a retry. The partial unique index is identical; the trigger becomes a `plpgsql` trigger or a `confirmed_count` column updated with `UPDATE … WHERE confirmed_count < capacity` as a compare-and-swap.
 - **Synchronous provider.** With webhooks, `pay()` splits in two: the HTTP handler creates the attempt and the provider intent; the webhook handler (idempotent on `provider_ref`) runs steps 3–4. The seat claim, refund and retry logic do not change.
