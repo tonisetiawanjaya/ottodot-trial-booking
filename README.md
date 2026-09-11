@@ -74,7 +74,7 @@ The same list is under "Demo accounts" on the login page. Sessions are cookies, 
 
 ### Time spent
 
-About **1 h 45 min of wall-clock time**, in one sitting on 8 September 2026, working with Claude Code (see [AI_USAGE.md](AI_USAGE.md)). That is well inside the 4-hour cap, so this is where the time went rather than an apology:
+About **1 h 45 min of wall-clock time** for the build, in one sitting on 8 September 2026, working with Claude Code (see [AI_USAGE.md](AI_USAGE.md)). The figure comes from file and commit timestamps. Recording and editing the walkthrough video happened separately, on 11 September. The build is well inside the 4-hour cap. Here is where the time went:
 
 | Pass | What | ≈ |
 |---|---|---|

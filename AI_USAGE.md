@@ -2,43 +2,42 @@
 
 ## Which AI tools I used
 
-- **Claude Code** (Anthropic's agentic coding tool, desktop app, Claude Fable 5.1 model). I gave it the take-home brief as the `.docx` and steered it through the build in one sitting.
-- No other AI tools.
+- **Claude Code**, Anthropic's coding agent, in the Claude desktop app. The build ran on the Claude Fable 5.1 model. From the video preparation onward I switched to Claude Opus 5. Each commit's `Co-Authored-By` line shows which model was involved.
 
 ## What I used AI for
 
-- **Reading the brief and turning it into a design**: mapping the four required edge cases (duplicate bookings, overbooking, payment failure, last-seat race) to concrete mechanisms, and deciding which check belongs in the UI, the service, the database, or a background job.
-- **Choosing the stack**: Node.js + TypeScript with the built-in `node:sqlite` and no runtime dependencies, so a reviewer can run it with `npm start` and nothing to install.
-- **Writing the implementation**: schema (partial unique index + capacity triggers), the booking service, the small HTTP layer, the pages, the seed data.
-- **Writing the tests**, including a payment-provider test double whose charges resolve only when the test says so, which makes the race scenario deterministic.
-- **Later passes I asked for after the core was done**: one screen per step and live seat counts; real username/password login with cookie sessions and per-family ownership checks; live updates over Server-Sent Events; a reconcile job for refunds the provider fails to process.
-- **Drafting the README, this file, and a demo script for the video**, which I reviewed and edited.
-- **Verification**: it ran the tests, the type check and the CLI demo, and drove the app in a browser to reproduce every edge case and the race across two sessions before I looked at the result.
+- **The build.** I gave it the brief as a `.docx` and asked it to build the solution. It designed the data model, wrote the code, the tests and the seed data, and wrote the first drafts of the README and this file.
+- **Changes I asked for after the first version worked:**
+  - a cleaner booking flow, with one screen per step and live seat counts;
+  - real username and password logins, with live updates;
+  - retrying refunds that the payment provider fails to process;
+  - Codespaces and CI, so a reviewer can run and verify it without installing anything.
+- **Checking the work against the brief**, and fixing what an independent review found (see below).
+- **The walkthrough video.** I recorded the screen and my narration separately. The AI lined them up, reduced the fan noise in my phone recording, and compressed the result for upload.
+- **Publishing.** Setting my commit identity, keeping my email address private on GitHub, and pushing.
 
 ## One place where AI helped me move faster
 
-The last-seat race test. The brief describes a specific interleaving (A starts paying, B starts paying, B finishes first, then A finishes). The AI put the payment provider behind a small interface and wrote a `ControlledProvider` for tests with a `settle(bookingId)` method, so the scenario became a plain sequential test with no timers and no flakiness: start A, start B, settle B → confirmed, settle A → refunded. The same seam made the "declined winner", "cancelled while the charge is in flight", "expiry job must skip in-flight charges" and, later, "refund provider is down" tests one-liners, and a separate burst test (12 families, random provider latency) covers the timing-based variant. Writing that harness by hand would have taken me the better part of an hour; here it was minutes, and I trust the test more than a timing-based one.
+The last-seat race test. The brief describes an exact order of events: A starts paying, B starts paying, B finishes first, then A finishes. The AI put the payment provider behind a small interface and wrote a test version whose charges complete only when the test says so. That turned the race into a plain step-by-step test with no timers: start A, start B, complete B and check it is confirmed, complete A and check it is refunded. The same approach made the other awkward cases easy to test, such as a declined card on the winning side or a refund provider that is down. A separate test sends twelve families after the last seat at once, with random delays, to cover the timing-based version.
 
 ## One place where I disagreed with, corrected, or rejected AI output
 
-Two, one about scope and one about honesty in the write-up.
+**Leaving login out.** The AI's first version had no login on purpose. A "signed in as" dropdown let you pick any parent, and authentication was listed under *what I deliberately cut*. That is a fair reading of the brief, but I rejected it for the demo. I asked for real username and password logins, so the demo would behave like a real website and update in real time. The result is enforced accounts, sessions and per-family ownership checks instead of an assumption in the README. It also means the last-seat race can be shown between two separately logged-in parents, with both pages updating as it happens. It cost a larger change than the brief needed, and the README's *Time spent* section says so.
 
-- **Scope.** The first version deliberately left authentication out: a "signed in as (demo: pick a parent)" dropdown, with auth listed under *what I deliberately cut* and "in production the parent id would come from the session" written as an assumption. That is a defensible reading of the brief, but I rejected it for the demo. I wanted the application to behave like the real product: each family logs in with a username and password, and the last-seat race is only convincing when two genuinely separate sessions compete and every open page updates the moment the seat is taken. So I asked for real login (scrypt hashes, server-side sessions, parent-owns-child checks) and push updates over SSE. That turned a README assumption into enforced code with its own tests, at the cost of a bigger diff than the brief strictly needed; the README's *Time spent* section says so explicitly.
-- **The time figure.** The AI's README draft contained "~3.5 hours, in line with the 3–4 hour timebox" as a placeholder. It was not true; the whole thing took about 1 h 45 min of wall-clock time. I had it replaced with the real per-pass timeline and a note that the first commit is the pass-1 scope, because a reviewer evaluating scope control should see the real number, not a number that looks expected.
-
-A smaller one worth recording: the AI's first HTTP test tried to trigger `CLASS_FULL` with a child who was *already confirmed* in that full class, and the test failed with `DUPLICATE_BOOKING`. The service was right (the duplicate check runs before the capacity check so the parent gets the more specific error); the fix was to the test, not the code. Reading *why* a test fails, instead of making it pass, is where most of my review attention went.
+**Not taking "all tests pass" on trust.** The AI reported that all tests passed. Before submitting, I exported the project and had it reviewed against the brief in a different environment. On Node 22.16 the tests did not even load. Running TypeScript without a flag only became the default in Node 22.18, and the AI had only ever run the tests on Node 24. The fix was to pass the flag explicitly in every script, add a version check with a clear message, and add a Dockerfile. Later I asked for CI as well, and it now runs the tests on both Node 22.13 and Node 24 on every push.
 
 ## What I would change about my AI workflow next time
 
-- **Decide the demo scope up front.** Adding login and live updates after the core touched 18 files. Had I said "real login, real time" in the first prompt, the data model would have had `accounts` and `sessions` from the start and the API would not have changed shape once.
-- **Write the invariants and the test names by hand first** and give them to the AI as acceptance criteria. It proposes good tests, but the list is the thing I most want to own.
-- **Keep a timer per pass.** I reconstructed the timeline from file timestamps and commit times at the end; a running log would have made the *Time spent* section trivial and more precise.
-- **Review the largest generated file first.** Both test mistakes in the session were in the biggest generated file. Smaller diffs are easier to read properly.
+- **Decide the demo scope in the first prompt.** Adding login after the core was built touched 18 files. Asking for it at the start would have put accounts in the data model from the beginning.
+- **Test on the oldest Node version I claim to support, from the start.** The version problem was invisible on my own machine until someone ran it elsewhere.
+- **Record the screen and my voice together, with a proper microphone.** Recording them separately meant lining them up afterwards and removing a lot of fan noise.
 
 ## How I verified the final implementation
 
-- `npm test`: 49 tests across the service, auth and ownership, refund reconciliation, the raw database constraints (bypassing the service on purpose) and real HTTP with cookies and an SSE stream, all passing in under two seconds.
-- `npm run typecheck`: `tsc --noEmit` clean under `strict`.
-- `npm run demo:race`: the narrated scenario prints B confirmed, A refunded with `seat_taken`, roster 4/4, invariant OK.
-- Manual run of the server in a browser: wrong password rejected, login as two different families, booked and paid, reproduced the declined-card and duplicate cases, reproduced the race with the "slow payment network" toggle while the other family paid through the API, and watched the first family's page and the admin roster update live without a refresh. One thing this caught: the earlier README told reviewers to use "two tabs" for the race, which cannot work with cookie sessions; it now says two browsers.
-- Exported the tree with a SHA-256 manifest of every file and had that export audited independently against the brief. The audit passed every functional and backend requirement but found that on Node 22.16 the `.ts` tests could not even load (type stripping is only default from 22.18), which my own Node 24 machine could never have shown me. The fix was to pass the flag explicitly in every script, add a plain-JavaScript version check that runs before `start`/`test` and says what to do, ship an `.nvmrc` and a Dockerfile, and re-run the suite from a clean clone.
+- `npm test` runs 49 tests. They cover the booking rules, login and ownership, refund retries, the database constraints tested directly, and real HTTP requests with cookies and live updates.
+- `npm run typecheck` is clean under strict TypeScript, and `npm run demo:race` prints the race step by step and checks that no class goes over four.
+- **CI on GitHub Actions** runs all of it on Node 22.13 and Node 24 on every push. The tests run before any `npm install`, which checks the zero-dependency claim.
+- **A fresh clone from GitHub**, with no database folder, starts with `npm start`, creates and seeds its own database, and serves the expected seat counts.
+- **The independent review** of an exported copy, described above, which found the Node version problem.
+- **The AI drove the app in a browser** as two logged-in families and reproduced each edge case. That run caught a mistake in the README: two tabs in one browser share a login, so the race needs two browsers.
+- **I ran the app myself** to record the walkthrough video.
