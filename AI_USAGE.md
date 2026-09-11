@@ -3,6 +3,7 @@
 ## Which AI tools I used
 
 - **Claude Code**, Anthropic's coding agent, in the Claude desktop app. The build ran on the Claude Fable 5.1 model. From the video preparation onward I switched to Claude Opus 5. Each commit's `Co-Authored-By` line shows which model was involved.
+- **ChatGPT**, OpenAI's assistant, for brainstorming.
 
 ## What I used AI for
 
