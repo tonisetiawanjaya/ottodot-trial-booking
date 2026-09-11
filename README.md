@@ -1,6 +1,6 @@
 # Ottodot Trial Booking
 
-> **Video walkthrough:** _link to be added before submission_
+> **Video walkthrough (6 min 38 s):** https://youtu.be/s2BQIimzGPc
 
 [![CI](https://github.com/tonisetiawanjaya/ottodot-trial-booking/actions/workflows/ci.yml/badge.svg)](https://github.com/tonisetiawanjaya/ottodot-trial-booking/actions/workflows/ci.yml)
 
